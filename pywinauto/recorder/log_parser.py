@@ -53,7 +53,10 @@ class LogParser(object):
                 subpattern = action.get_subpattern(event_pattern)
                 if subpattern:
                     if hook_event.control_tree_node:
-                        subtree = self.recorder.control_tree.sub_tree_from_node(hook_event.control_tree_node)
+                        control_tree = hook_event.control_tree
+                        if not control_tree:
+                            control_tree = self.recorder.control_tree
+                        subtree = control_tree.sub_tree_from_node(hook_event.control_tree_node)
 
                         if isinstance(handler, type) and issubclass(handler, EventHandler):
                             s = handler(subtree, self, subpattern).run()

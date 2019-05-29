@@ -38,9 +38,17 @@ class Win32MenuSelectHandler(EventHandler):
         submenu_item_text = self._cut_at_tab(self.subtree[0].metadata["submenu_item_text"])
         return u"app{}.menu_select(u'{} -> {}')\n".format(self.get_root_name(), menu_item_text, submenu_item_text)
 
+class Win32ComboBoxHandler(EventHandler):
+
+    def run(self):
+        selected_item = self.subtree[0].metadata["selected_item"]
+        return u"app{}{}.select(u'{}')\n".format(self.get_root_name(), self.get_sender_name(0), selected_item)
+
 class Win32Recorder(BaseRecorder):
 
     _EVENT_PATTERN_MAP = [
+        (EventPattern(hook_event=RecorderMouseEvent(current_key=HOOK_MOUSE_LEFT_BUTTON, event_type=HOOK_KEY_DOWN),
+                  app_events=(ApplicationEvent(name="CBN_SELENDOK"),)), Win32ComboBoxHandler),
         (EventPattern(hook_event=RecorderMouseEvent(current_key=HOOK_MOUSE_LEFT_BUTTON, event_type=HOOK_KEY_DOWN),
                   app_events=(ApplicationEvent(name="MENUSELECT"),)), Win32MenuSelectHandler),
         (EventPattern(hook_event=RecorderMouseEvent(current_key=None, event_type=HOOK_KEY_DOWN)), MouseClickHandler),
@@ -64,6 +72,9 @@ class Win32Recorder(BaseRecorder):
 
         win32defines.WM_MENUSELECT,
         win32defines.WM_SYSCOMMAND,
+
+        win32defines.WM_CREATE,
+        win32defines.WM_QUIT,
     ]
 
     def __init__(self, app, config, record_props=True, record_focus=False, record_struct=False):
@@ -83,6 +94,7 @@ class Win32Recorder(BaseRecorder):
         self.prev_msg_id = None
         self.prev_time = None
         self.menu_data = {}
+        self.prev = None
 
     def _setup(self):
         try:
@@ -229,10 +241,48 @@ class Win32Recorder(BaseRecorder):
             class_name, event_name = resolve_handle_to_event(component, msg, True)
             if class_name and event_name:
                 print('{} - {}'.format(class_name, event_name))
+                #parent = HwndElementInfo(msg.hWnd)
+                #last = parent
+                #while parent and parent.handle != self.wrapper.handle:
+                #    print("{} - {}".format(parent, parent.handle))
+                #    last = parent
+                #    parent = parent.parent
+                #print(last.handle)
+                #print(self.app.window(handle = msg.hWnd).wrapper_object)
+
+                if not self.prev:
+                    return
+
+                #self.prev = None
+                print("WHY")
+                
+                #self.tmp_ct.print_tree()
+                
+                #hook_event.control_tree.print_tree()
+                hook_event = RecorderMouseEvent(current_key=HOOK_MOUSE_LEFT_BUTTON, event_type=HOOK_KEY_DOWN)
+                hook_event.mouse_x = component.rectangle.mid_point().x
+                hook_event.mouse_y = component.rectangle.mid_point().y
+                print("{}{}".format(hook_event.mouse_x, hook_event.mouse_y))
+
+                if class_name == "ComboBox":
+                    hook_event.control_tree = ControlTree(self.window_wrapper)
+                    hook_event.control_tree_node = hook_event.control_tree.node_from_element_info(component)
+                    if hook_event.control_tree_node:
+                        hook_event.control_tree_node.metadata["selected_item"] = hook_event.control_tree_node.wrapper.selected_text()
+                        print(hook_event.control_tree_node.metadata["selected_item"])
+                        self._remove_menu_rect_clicks(component.rectangle)
+
+                        self.add_to_log(hook_event)
+                        self.add_to_log(ApplicationEvent(name=event_name, sender=None))
+
+                pass
+                
 
     def _menu_open_handler(self, msg):
         if msg.message != win32defines.WM_MENUSELECT:
             return
+
+        print("_menu_open_handler")
 
         selected_index = msg.wParam & 0xFFFF
         menu_wrapper = self.app.window(handle = msg.hWnd).menu()
@@ -254,6 +304,8 @@ class Win32Recorder(BaseRecorder):
     def _menu_choose_handler(self, msg):
         if msg.message != win32defines.WM_COMMAND or HIWORD(msg.wParam) != 0 or msg.lParam != 0:
             return
+
+        print("_menu_choose_handler")
 
         menu_id = LOWORD(msg.wParam)
         for submenu_data in self.menu_data["submenus"]:
@@ -294,6 +346,21 @@ class Win32Recorder(BaseRecorder):
 
         for handle in self._message_handlers:
             handle(self, msg)
+
+        if msg.message == win32defines.WM_CREATE:
+            element_info = HwndElementInfo(msg.hWnd)
+            print("WM_CREATE {}".format(msg.hWnd))
+            if element_info.class_name == "#32770":
+            
+                self.window_wrapper = self.app.window(handle = msg.hWnd).wrapper_object()
+                if self.wrapper.handle != self.window_wrapper.handle:
+                    self.prev = 1
+                    #time.sleep(0.5)
+                    #tmp_ct.print_tree()
+
+       
+        if msg.message == win32defines.WM_QUIT:
+            print("WM_QUIT")
 
     @property
     def event_patterns(self):

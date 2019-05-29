@@ -240,15 +240,15 @@ class RecorderEvent(object):
 
     def __str__(self):
         """Return a representation of the object as a string"""
-        if six.PY2:
-            if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding is not None:
-                # some frameworks override sys.stdout without encoding attribute (Tee Stream),
-                # some users replace sys.stdout with file descriptor which can have None encoding
-                return self.__repr__().encode(sys.stdout.encoding, errors='backslashreplace')
-            else:
-                return self.__repr__().encode(locale.getpreferredencoding(), errors='backslashreplace')
-        else:
-            return self.__repr__()
+        # if six.PY2:
+        #     if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding is not None:
+        #         # some frameworks override sys.stdout without encoding attribute (Tee Stream),
+        #         # some users replace sys.stdout with file descriptor which can have None encoding
+        #         return self.__repr__().encode(sys.stdout.encoding, errors='backslashreplace')
+        #     else:
+        #         return self.__repr__().encode(locale.getpreferredencoding(), errors='backslashreplace')
+        # else:
+        return ""
 
 
 class HookEvent(RecorderEvent):
@@ -256,6 +256,7 @@ class HookEvent(RecorderEvent):
         super(HookEvent, self).__init__()
         self.current_key = current_key
         self.event_type = event_type
+        self.control_tree = None
 
 
 class RecorderMouseEvent(HookEvent):
