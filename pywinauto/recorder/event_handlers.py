@@ -95,8 +95,8 @@ class MouseClickHandler(EventHandler):
 
         # Check if text has been typed
         for k, v in self.log_parser.text_sequence.items():
-            item_name = get_window_access_name_str(k.names.get_preferred_name(), self.key_only)
-            script += u"app{}{}.type_keys(u'{}')\n".format(self.get_root_name(), item_name, v)
+            item_name = get_window_access_name_str(k[1].names.get_preferred_name(), self.key_only)
+            script += u"app{}{}.type_keys(u'{}')\n".format(k[0], item_name, v)
         self.log_parser.text_sequence = {}
 
         # Process left click
@@ -151,5 +151,6 @@ class KeyboardHandler(EventHandler):
             uia_ctrl = hook_event.control_tree_node
         else:
             uia_ctrl = "hotkey"
-        self.log_parser.text_sequence.setdefault(uia_ctrl, "")
-        self.log_parser.text_sequence[uia_ctrl] += hook_event.current_key
+        self.log_parser.text_sequence.setdefault((self.get_root_name(), uia_ctrl), "")
+        self.log_parser.text_sequence[(self.get_root_name(), uia_ctrl)] += hook_event.current_key
+
