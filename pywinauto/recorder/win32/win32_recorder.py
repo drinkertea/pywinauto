@@ -60,6 +60,7 @@ class Win32Recorder(BaseRecorder):
         win32defines.WM_NOTIFY,
 
         win32defines.WM_KEYUP,
+        win32defines.WM_KEYDOWN,
         win32defines.WM_SETFOCUS,
 
         win32defines.WM_CONTEXTMENU,
@@ -83,9 +84,15 @@ class Win32Recorder(BaseRecorder):
             raise TypeError("app must be a pywinauto.Application object of 'win32' backend")
 
         self.last_kbd_hwnd = None
+        self.last_mouse_hwnd = None
         self.app = app
         self.listen = False
         self.hook = win32_hooks.Hook()
+
+        for key in self.hook.MOUSE_ID_TO_KEY:
+            if key != win32defines.WM_MOUSEMOVE:
+                self._APPROVED_MESSAGES_LIST.append(key)
+
         self.record_props = record_props
         self.record_focus = record_focus
         self.record_struct = record_struct
@@ -101,8 +108,15 @@ class Win32Recorder(BaseRecorder):
             self.listen = True
             self.injector = Injector(self.wrapper, approved_messages_list = self._APPROVED_MESSAGES_LIST)
             self.control_tree = ControlTree(self.wrapper, skip_rebuild=True)
-            self._update(rebuild_tree=True, start_message_queue=True)
-        except:
+            self.contorl_tree_by_hwnd = {}
+            for window in self.app.windows():
+                self.contorl_tree_by_hwnd[window.element_info.handle] = ControlTree(window, skip_rebuild=True)
+                self._update(self.contorl_tree_by_hwnd[window.element_info.handle], rebuild_tree=True, start_message_queue=True)
+
+            print(self.contorl_tree_by_hwnd)
+            self._update(self.control_tree, rebuild_tree=True, start_message_queue=True)
+        except Exception as e:
+            print(e)
             self.stop()
 
     def _cleanup(self):
@@ -125,14 +139,14 @@ class Win32Recorder(BaseRecorder):
         self.hook_thread = threading.Thread(target=self._hook_target)
         self.hook_thread.start()
 
-    def _update(self, rebuild_tree=False, start_message_queue=False):
+    def _update(self, tree, rebuild_tree=False, start_message_queue=False):
         if rebuild_tree:
-            pbar_dlg = ProgressBarDialog(self.control_tree.root.rect if self.control_tree.root else None)
+            pbar_dlg = ProgressBarDialog(tree.root.rect if tree.root else None)
             pbar_dlg.show()
 
             self._pause_hook_thread()
 
-            rebuild_tree_thr = threading.Thread(target=self._rebuild_control_tree)
+            rebuild_tree_thr = threading.Thread(target=self._rebuild_control_tree, args=(tree,))
             rebuild_tree_thr.start()
             pbar_dlg.pbar.SetPos(50)
             rebuild_tree_thr.join()
@@ -145,29 +159,56 @@ class Win32Recorder(BaseRecorder):
             self.message_thread = threading.Thread(target=self._message_queue)
             self.message_thread.start()
 
-    def _rebuild_control_tree(self):
+    def _rebuild_control_tree(self, tree):
         if self.config.verbose:
             start_time = timeit.default_timer()
             print("[_rebuild_control_tree] Rebuilding control tree")
-        self.control_tree.rebuild()
+        tree.rebuild()
         if self.config.verbose:
             print("[_rebuild_control_tree] Finished rebuilding control tree. Time = {}".format(
                 timeit.default_timer() - start_time))
 
+    def _check_tree_by_handle(self, handle):
+        if handle not in self.contorl_tree_by_hwnd:
+            print("New window founded")
+            new_window_wrapper = (self.app.window(handle = handle).wrapper_object())
+            print(new_window_wrapper)
+            self.contorl_tree_by_hwnd[handle] = ControlTree(new_window_wrapper)
+        print(self.contorl_tree_by_hwnd[handle].print_tree())
+
+    def _get_nearest_dialog(self, element_info):
+        while element_info:
+            if element_info.handle in self.contorl_tree_by_hwnd:
+                break
+            if element_info.class_name == "#32770":
+                self._check_tree_by_handle(element_info.handle)
+                break
+            element_info = element_info.parent
+        return self.contorl_tree_by_hwnd[element_info.handle]
+
     def _get_keyboard_node(self):
-        node = None
         if not self.last_kbd_hwnd:
             time.sleep(0.1)
-        if self.control_tree and self.last_kbd_hwnd:
-            focused_element_info = HwndElementInfo(self.last_kbd_hwnd)
-            node = self.control_tree.node_from_element_info(focused_element_info)
-        return node
+        if not self.last_kbd_hwnd:
+            return None, None
+
+        focused_element_info = HwndElementInfo(self.last_kbd_hwnd)
+
+        #window_handle = focused_element_info.parent.handle
+        #self._check_tree_by_handle(window_handle)
+        control_tree = self._get_nearest_dialog(focused_element_info)
+        return control_tree, control_tree.node_from_element_info(focused_element_info)
 
     def _get_mouse_node(self, mouse_event):
-        node = None
-        if self.control_tree:
-            node = self.control_tree.node_from_point(POINT(mouse_event.mouse_x, mouse_event.mouse_y))
-        return node
+        if not self.last_mouse_hwnd:
+            time.sleep(0.1)
+        if not self.last_mouse_hwnd:
+            return None, None
+
+        focused_element_info = HwndElementInfo(self.last_mouse_hwnd)
+
+        control_tree = self._get_nearest_dialog(focused_element_info)
+        return control_tree, control_tree.node_from_point(POINT(mouse_event.mouse_x, mouse_event.mouse_y))
 
     def _message_queue(self):
         try:
@@ -189,10 +230,10 @@ class Win32Recorder(BaseRecorder):
         event = None
         if isinstance(hook_event, win32_hooks.KeyboardEvent):
             event = RecorderKeyboardEvent.from_hook_keyboard_event(hook_event)
-            event.control_tree_node = self._get_keyboard_node()
+            event.control_tree, event.control_tree_node = self._get_keyboard_node()
         elif isinstance(hook_event, win32_hooks.MouseEvent):
             event = RecorderMouseEvent.from_hook_mouse_event(hook_event)
-            event.control_tree_node = self._get_mouse_node(event)
+            event.control_tree, event.control_tree_node = self._get_mouse_node(event)
         if event and event.control_tree_node:
             self.add_to_log(event)
         elif not event.control_tree_node:
@@ -326,8 +367,11 @@ class Win32Recorder(BaseRecorder):
         self.add_to_log(ApplicationEvent(name="MENUSELECT", sender=None))
 
     def _type_keys_handle_handler(self, msg):
-        if msg.message == win32defines.WM_SETFOCUS or msg.message == win32defines.WM_KEYUP:
+        if msg.message == win32defines.WM_SETFOCUS or msg.message == win32defines.WM_KEYUP or msg.message == win32defines.WM_KEYDOWN:
             self.last_kbd_hwnd = msg.hWnd
+
+        if msg.message in self.hook.MOUSE_ID_TO_KEY:
+            self.last_mouse_hwnd = msg.hWnd
 
     _message_handlers = [
         _type_keys_handle_handler,
