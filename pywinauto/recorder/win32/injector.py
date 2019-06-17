@@ -9,9 +9,7 @@ import ctypes
 import six
 import os
 
-# Relative path, would be changed after adding to pywinauto
 dll_path = "./pywinauto/recorder/win32/dll_to_inject/"
-# TODO: add timeout to pywinauto timings and replace
 remote_call_timeout = 1000
 remote_call_error_str = "Couldn't create remote thread, dll not injected, inject and try again!"
 remote_call_injection_error_str = "Couldn't create remote thread"
